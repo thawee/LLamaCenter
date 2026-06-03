@@ -2,7 +2,7 @@
 
 # Configuration
 APP_NAME="LlamaCenter"
-APP_VERSION="0.0.1"
+APP_VERSION="0.0.2"
 BUNDLE_ID="com.user.LlamaCenter"
 EXECUTABLE_NAME="StatusDashboard"
 

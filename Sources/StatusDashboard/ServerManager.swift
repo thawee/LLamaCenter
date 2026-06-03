@@ -5,7 +5,6 @@ actor ServerManager {
     
     func startServer(binaryPath: String, arguments: [String], logPath: String) throws {
         stopServer()
-        killExistingServers()
         
         let expandedPath = NSString(string: binaryPath).expandingTildeInPath
         let expandedArgs = arguments.map { NSString(string: $0).expandingTildeInPath }
@@ -36,9 +35,13 @@ actor ServerManager {
     }
     
     func stopServer() {
-        if let process = process, process.isRunning {
-            process.terminate()
+        if let process = process {
+            if process.isRunning {
+                process.terminate()
+                process.waitUntilExit()
+            }
         }
+        killExistingServers()
         process = nil
     }
     
@@ -47,7 +50,7 @@ actor ServerManager {
 
     private func killExistingServers() {
         let task = Process()
-        task.launchPath = "/usr/bin/pkill"
+        task.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
         task.arguments = ["-9", "llama-server"]
         try? task.run()
         task.waitUntilExit()
