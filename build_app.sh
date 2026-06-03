@@ -2,10 +2,11 @@
 
 # Configuration
 APP_NAME="LlamaCenter"
+APP_VERSION="0.0.1"
 BUNDLE_ID="com.user.LlamaCenter"
 EXECUTABLE_NAME="StatusDashboard"
 
-echo "🔨 Building $APP_NAME..."
+echo "🔨 Building $APP_NAME v$APP_VERSION..."
 
 # 1. Build the binary
 swift build -c release
@@ -15,8 +16,11 @@ APP_BUNDLE="$APP_NAME.app"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources"
 
-# 3. Copy the binary
+# 3. Copy assets
 cp ".build/release/$EXECUTABLE_NAME" "$APP_BUNDLE/Contents/MacOS/"
+if [ -f "Resources/AppIcon.icns" ]; then
+    cp "Resources/AppIcon.icns" "$APP_BUNDLE/Contents/Resources/"
+fi
 
 # 4. Create Info.plist
 cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
@@ -26,6 +30,8 @@ cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
 <dict>
     <key>CFBundleExecutable</key>
     <string>$EXECUTABLE_NAME</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundleIdentifier</key>
     <string>$BUNDLE_ID</string>
     <key>CFBundleName</key>
@@ -33,7 +39,9 @@ cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>$APP_VERSION</string>
+    <key>CFBundleVersion</key>
+    <string>$APP_VERSION</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
