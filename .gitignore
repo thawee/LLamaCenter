@@ -1,0 +1,11 @@
+# Swift
+.build/
+Packages/
+Package.resolved
+.swiftpm/
+
+# macOS
+.DS_Store
+*.app/
+*.zip
+*.log
