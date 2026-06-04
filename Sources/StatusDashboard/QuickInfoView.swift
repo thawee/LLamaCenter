@@ -8,7 +8,7 @@ struct QuickInfoView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("🦙 LlamaCenter")
+                Text("🦙 LLM Center")
                     .font(.headline)
                 Spacer()
                 Button(action: {
@@ -21,61 +21,66 @@ struct QuickInfoView: View {
             
             Divider()
             
-            VStack(spacing: 12) {
-                QuickStatProgress(label: "CPU", value: viewModel.systemCPU, color: .blue)
-                QuickStatProgress(label: "RAM", value: viewModel.systemMemory, color: .green, max: viewModel.totalMemory, suffix: "GB")
+            HStack(spacing: 12) {
+                QuickGaugeStat(label: "CPU", iconName: "cpu", value: viewModel.systemCPU, max: 100, color: .blue)
+                QuickGaugeStat(label: "GPU", iconName: "display", value: viewModel.gpuUsage, max: 100, color: .orange)
+                QuickGaugeStat(label: "RAM", iconName: "memorychip", value: viewModel.systemMemory, max: viewModel.totalMemory, color: .green, suffix: "G")
             }
+            .padding(.vertical, 4)
             
             Divider()
             
-            HStack(spacing: 8) {
-                Button(action: {
-                    openWindow(id: "full-dashboard")
-                    NSApp.activate(ignoringOtherApps: true)
-                }) {
-                    Label("Dashboard", systemImage: "macwindow")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-                
-                Button(action: {
-                    openWindow(id: "observer-mini")
-                }) {
-                    Label("Observer", systemImage: "macwindow.badge.plus")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
+            Button(action: {
+                openWindow(id: "full-dashboard")
+                NSApp.activate(ignoringOtherApps: true)
+                dismiss()
+            }) {
+                Label("Dashboard", systemImage: "macwindow")
+                    .frame(maxWidth: .infinity)
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.small)
         }
         .padding()
-        .frame(width: 260)
+        .frame(width: 280) // Slightly widened for spacing comfort
     }
 }
 
-struct QuickStatProgress: View {
+struct QuickGaugeStat: View {
     let label: String
+    let iconName: String
     let value: Double
+    let max: Double
     let color: Color
-    var max: Double = 100
     var suffix: String = "%"
-    var format: String = "%.0f"
     
     var body: some View {
-        VStack(spacing: 4) {
-            HStack {
-                Text(label)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Spacer()
-                Text("\(String(format: format, value))\(suffix)")
-                    .font(.caption.monospacedDigit())
-                    .bold()
+        HStack(spacing: 6) {
+            ZStack {
+                Circle()
+                    .stroke(color.opacity(0.12), lineWidth: 2.5)
+                    .frame(width: 28, height: 28)
+                
+                Circle()
+                    .trim(from: 0.0, to: CGFloat(min(value / (max > 0 ? max : 1), 1.0)))
+                    .stroke(color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .frame(width: 28, height: 28)
+                    .rotationEffect(Angle(degrees: -90))
+                
+                Image(systemName: iconName)
+                    .font(.system(size: 9))
+                    .foregroundColor(color)
             }
-            ProgressView(value: value, total: max)
-                .tint(color)
-                .scaleEffect(x: 1, y: 0.5, anchor: .center)
+            
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundColor(.secondary)
+                Text("\(Int(value))\(suffix)")
+                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .foregroundColor(.primary.opacity(0.85))
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

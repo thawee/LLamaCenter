@@ -92,20 +92,23 @@ final class DashboardViewModel {
         
         // Service Presence Detection
         self.hasOllama = processes.contains(where: { $0.name.localizedCaseInsensitiveContains("ollama") })
-        self.hasLlamaCpp = processes.contains(where: { $0.name.localizedCaseInsensitiveContains("llama-server") })
-        self.hasMLX = processes.contains(where: { $0.name.localizedCaseInsensitiveContains("mlx") }) // Basic check
+        self.hasLlamaCpp = processes.contains(where: { !$0.isMLX && $0.name.localizedCaseInsensitiveContains("llama-server") })
+        self.hasMLX = processes.contains(where: { $0.isMLX })
         
         // Recover managed state
         let managedRunning = await serverManager.isRunning()
-        self.isServerManaged = managedRunning || processes.contains(where: { $0.name.contains("llama-server") })
+        let hasLlamaRunning = processes.contains(where: { !$0.isMLX && !$0.name.localizedCaseInsensitiveContains("ollama") })
+        let hasMlxRunning = processes.contains(where: { $0.isMLX })
+        self.isServerManaged = managedRunning || hasLlamaRunning || hasMlxRunning
         
         // Model aggregation
         var allModels: [LLMModelStatus] = []
         
-        // 1. llama-server models (Only if server is running)
-        if processes.contains(where: { $0.name.contains("llama-server") }) {
-            let llamaModels = await serverClient.fetchLoadedModels()
-            allModels.append(contentsOf: llamaModels)
+        // 1. llama-server or mlx-server models (Only if server is running)
+        if hasLlamaRunning || hasMlxRunning {
+            let engineSource: LLMModelSource = hasMlxRunning ? .mlx : .llama
+            let serverModels = await serverClient.fetchLoadedModels(source: engineSource)
+            allModels.append(contentsOf: serverModels)
         }
         
         // 2. Ollama models
@@ -214,5 +217,12 @@ struct LLMModelStatus: Identifiable, Hashable {
 }
 
 enum LLMModelSource: String, Codable {
-    case llama, ollama
+    case llama, ollama, mlx
+}
+
+enum ServerType: String, CaseIterable, Identifiable, Codable {
+    case llamaCpp = "llama.cpp"
+    case mlx = "MLX"
+    
+    var id: String { self.rawValue }
 }

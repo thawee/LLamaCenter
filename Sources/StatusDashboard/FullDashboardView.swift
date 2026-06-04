@@ -4,6 +4,15 @@ struct FullDashboardView: View {
     var viewModel: DashboardViewModel
     @State private var selection: SidebarItem? = .overview
     @AppStorage("dashboardAlwaysOnTop") private var alwaysOnTop: Bool = false
+    @AppStorage("showDockIcon") private var showDockIcon: Bool = true
+    @AppStorage("autoObserverOnIdle") private var autoObserverOnIdle: Bool = false
+    @AppStorage("launchAtLogin") private var launchAtLogin: Bool = false
+    
+    @State private var eventMonitor: Any? = nil
+    @State private var idleTimer: Timer? = nil
+    
+    @Environment(\.openWindow) private var openWindow
+    @Environment(\.dismiss) private var dismiss
     
     enum SidebarItem: String, CaseIterable, Identifiable {
         case overview, server, processes, models, logs
@@ -22,7 +31,7 @@ struct FullDashboardView: View {
                         .tag(SidebarItem.models)
                 }
                 
-                Section("llama.cpp") {
+                Section("Server") {
                     Label("Launcher", systemImage: "slider.horizontal.3")
                         .tag(SidebarItem.server)
                     Label("Logs", systemImage: "terminal")
@@ -30,18 +39,37 @@ struct FullDashboardView: View {
                 }
             }
             .listStyle(.sidebar)
-            .navigationTitle("LlamaCenter")
+            .navigationTitle("LLM Center")
             .safeAreaInset(edge: .bottom) {
-                VStack(spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
                     Divider()
+                    
                     Toggle(isOn: $alwaysOnTop) {
                         Label("Always on Top", systemImage: "macwindow.on.rectangle")
                             .font(.caption)
                     }
                     .toggleStyle(.checkbox)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    
+                    Toggle(isOn: $showDockIcon) {
+                        Label("Show in Dock", systemImage: "dock.arrow.up.to.window")
+                            .font(.caption)
+                    }
+                    .toggleStyle(.checkbox)
+                    
+                    Toggle(isOn: $autoObserverOnIdle) {
+                        Label("Auto Observer (5m)", systemImage: "timer")
+                            .font(.caption)
+                    }
+                    .toggleStyle(.checkbox)
+                    
+                    Toggle(isOn: $launchAtLogin) {
+                        Label("Launch at Login", systemImage: "play.house")
+                            .font(.caption)
+                    }
+                    .toggleStyle(.checkbox)
                 }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .background(.ultraThinMaterial)
             }
         } detail: {
@@ -62,18 +90,95 @@ struct FullDashboardView: View {
                 }
             }
         }
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: {
+                    openWindow(id: "observer-mini")
+                    dismiss()
+                }) {
+                    Label("Observer Mode", systemImage: "arrow.down.right.and.arrow.up.left")
+                }
+                .help("Transform to Observer Mode")
+            }
+        }
         .onAppear {
             updateWindowLevel()
+            updateActivationPolicy()
             NSApp.activate(ignoringOtherApps: true)
+            setupEventMonitor()
+            startIdleTimer()
+            launchAtLogin = LaunchAtLoginManager.isEnabled
+        }
+        .onDisappear {
+            removeEventMonitor()
+            stopIdleTimer()
         }
         .onChange(of: alwaysOnTop) {
             updateWindowLevel()
+        }
+        .onChange(of: showDockIcon) {
+            updateActivationPolicy()
+        }
+        .onChange(of: autoObserverOnIdle) { oldValue, newValue in
+            if newValue {
+                startIdleTimer()
+            } else {
+                stopIdleTimer()
+            }
+        }
+        .onChange(of: launchAtLogin) { oldValue, newValue in
+            LaunchAtLoginManager.isEnabled = newValue
+        }
+    }
+    
+    private func startIdleTimer() {
+        idleTimer?.invalidate()
+        guard autoObserverOnIdle else { return }
+        idleTimer = Timer.scheduledTimer(withTimeInterval: 300, repeats: false) { _ in
+            DispatchQueue.main.async {
+                openWindow(id: "observer-mini")
+                dismiss()
+            }
+        }
+    }
+    
+    private func stopIdleTimer() {
+        idleTimer?.invalidate()
+        idleTimer = nil
+    }
+    
+    private func setupEventMonitor() {
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.mouseMoved, .leftMouseDown, .rightMouseDown, .keyDown]) { event in
+            startIdleTimer()
+            return event
+        }
+    }
+    
+    private func removeEventMonitor() {
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+            eventMonitor = nil
         }
     }
     
     private func updateWindowLevel() {
         if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "full-dashboard" }) {
             window.level = alwaysOnTop ? .floating : .normal
+        }
+    }
+    
+    private func updateActivationPolicy() {
+        if showDockIcon {
+            NSApp.setActivationPolicy(.regular)
+        } else {
+            NSApp.setActivationPolicy(.accessory)
+            // Re-activate the application and restore the dashboard window
+            DispatchQueue.main.async {
+                NSApp.activate(ignoringOtherApps: true)
+                if let window = NSApp.windows.first(where: { $0.identifier?.rawValue == "full-dashboard" }) {
+                    window.makeKeyAndOrderFront(nil)
+                }
+            }
         }
     }
 }
@@ -122,22 +227,10 @@ struct StatusBannerView: View {
             
             // Persistent Metrics
             HStack(spacing: 24) {
-                BannerStat(label: "CPU", value: viewModel.systemCPU, color: .blue)
-                BannerStat(label: "GPU", value: viewModel.gpuUsage, color: .orange)
-                BannerStat(label: "RAM", value: viewModel.systemMemory, color: .green, suffix: "GB")
+                BannerGaugeStat(label: "CPU", iconName: "cpu", value: viewModel.systemCPU, max: 100, color: .blue)
+                BannerGaugeStat(label: "GPU", iconName: "display", value: viewModel.gpuUsage, max: 100, color: .orange)
+                BannerGaugeStat(label: "RAM", iconName: "memorychip", value: viewModel.systemMemory, max: viewModel.totalMemory, color: .green, suffix: "GB")
             }
-            .padding(.trailing, 20)
-            
-            // Transform to Observer Button
-            Button(action: {
-                openWindow(id: "observer-mini")
-                dismiss() // Close full dashboard
-            }) {
-                Image(systemName: "arrow.down.right.and.arrow.up.left")
-                    .font(.system(size: 12, weight: .bold))
-            }
-            .buttonStyle(.bordered)
-            .help("Transform to Observer Mode")
         }
         .padding(.horizontal, 30)
         .padding(.vertical, 20)
@@ -146,31 +239,62 @@ struct StatusBannerView: View {
     }
 }
 
-struct BannerStat: View {
+struct BannerGaugeStat: View {
     let label: String
+    let iconName: String
     let value: Double
+    let max: Double
     let color: Color
     var suffix: String = "%"
     
     var body: some View {
-        VStack(alignment: .trailing, spacing: 2) {
-            Text(label)
-                .font(.caption2.bold())
-                .foregroundColor(.secondary)
-            Text("\(Int(value))\(suffix)")
-                .font(.system(.subheadline, design: .rounded))
-                .bold()
-                .foregroundColor(color)
+        HStack(spacing: 8) {
+            ZStack {
+                Circle()
+                    .stroke(color.opacity(0.12), lineWidth: 3)
+                    .frame(width: 32, height: 32)
+                
+                Circle()
+                    .trim(from: 0.0, to: CGFloat(min(value / (max > 0 ? max : 1), 1.0)))
+                    .stroke(color, style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                    .frame(width: 32, height: 32)
+                    .rotationEffect(Angle(degrees: -90))
+                
+                Image(systemName: iconName)
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(color)
+            }
+            
+            VStack(alignment: .leading, spacing: 1) {
+                Text(label)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.secondary)
+                
+                Text("\(Int(value))\(suffix)")
+                    .font(.system(.subheadline, design: .rounded))
+                    .bold()
+                    .foregroundColor(color)
+            }
         }
     }
 }
 
 struct ServerControlView: View {
     var viewModel: DashboardViewModel
+    @AppStorage("serverType") private var serverType: ServerType = .llamaCpp
+    
+    // llama.cpp settings
     @AppStorage("serverBinaryPath") private var binaryPath: String = "~/.local/llama.cpp/llama-server"
-    @AppStorage("serverPort") private var port: String = "8080"
     @AppStorage("serverPresetPath") private var presetPath: String = "~/.local/models/llama-models.ini"
     @AppStorage("serverExtraArgs") private var extraArgs: String = ""
+    
+    // MLX settings
+    @AppStorage("mlxBinaryPath") private var mlxBinaryPath: String = "mlx_lm.server"
+    @AppStorage("mlxModel") private var mlxModel: String = "jedisct1/gemma-4-12B-it-txt-mlx-8bit"
+    @AppStorage("mlxExtraArgs") private var mlxExtraArgs: String = ""
+    
+    // Shared port setting
+    @AppStorage("serverPort") private var port: String = "8080"
     
     var body: some View {
         ScrollView {
@@ -180,50 +304,82 @@ struct ServerControlView: View {
                         .font(.caption.bold())
                         .foregroundColor(.secondary)
                     
-                    ConfigField(label: "Binary Path", hint: "Full path to your llama-server executable") {
-                        HStack {
-                            TextField("", text: $binaryPath)
-                                .textFieldStyle(.roundedBorder)
-                            Button(action: {
-                                let panel = NSOpenPanel()
-                                panel.canChooseDirectories = false
-                                if panel.runModal() == .OK {
-                                    binaryPath = panel.url?.path ?? binaryPath
-                                }
-                            }) {
-                                Image(systemName: "folder")
-                            }
-                            .buttonStyle(.bordered)
+                    Picker("Server Engine", selection: $serverType) {
+                        ForEach(ServerType.allCases) { type in
+                            Text(type.rawValue).tag(type)
                         }
                     }
+                    .pickerStyle(.segmented)
                     
-                    HStack(alignment: .top, spacing: 24) {
-                        ConfigField(label: "Port", hint: "Local server port") {
-                            TextField("", text: $port)
-                                .textFieldStyle(.roundedBorder)
-                                .frame(width: 100)
-                        }
-                        
-                        ConfigField(label: "Preset Models File (.ini)", hint: "Path to your llama-models.ini") {
+                    if serverType == .llamaCpp {
+                        ConfigField(label: "Binary Path", hint: "Full path to your llama-server executable") {
                             HStack {
-                                TextField("", text: $presetPath)
+                                TextField("", text: $binaryPath)
                                     .textFieldStyle(.roundedBorder)
-                                
                                 Button(action: {
-                                    let expanded = NSString(string: presetPath).expandingTildeInPath
-                                    NSWorkspace.shared.open(URL(fileURLWithPath: expanded))
+                                    let panel = NSOpenPanel()
+                                    panel.canChooseDirectories = false
+                                    if panel.runModal() == .OK {
+                                        binaryPath = panel.url?.path ?? binaryPath
+                                    }
                                 }) {
-                                    Image(systemName: "pencil")
+                                    Image(systemName: "folder")
                                 }
                                 .buttonStyle(.bordered)
-                                .help("Edit in default editor")
                             }
                         }
-                    }
-                    
-                    ConfigField(label: "Extra Arguments", hint: "Additional flags for llama-server") {
-                        TextField("--flash-attn true --ctx-size 8192", text: $extraArgs)
-                            .textFieldStyle(.roundedBorder)
+                        
+                        HStack(alignment: .top, spacing: 24) {
+                            ConfigField(label: "Port", hint: "Local server port") {
+                                TextField("", text: $port)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 100)
+                            }
+                            
+                            ConfigField(label: "Preset Models File (.ini)", hint: "Path to your llama-models.ini") {
+                                HStack {
+                                    TextField("", text: $presetPath)
+                                        .textFieldStyle(.roundedBorder)
+                                    
+                                    Button(action: {
+                                        let expanded = NSString(string: presetPath).expandingTildeInPath
+                                        NSWorkspace.shared.open(URL(fileURLWithPath: expanded))
+                                    }) {
+                                        Image(systemName: "pencil")
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .help("Edit in default editor")
+                                }
+                            }
+                        }
+                        
+                        ConfigField(label: "Extra Arguments", hint: "Additional flags for llama-server") {
+                            TextField("--flash-attn true --ctx-size 8192", text: $extraArgs)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                    } else {
+                        ConfigField(label: "Binary Path / Command", hint: "Command/path to mlx_lm.server (e.g. mlx_lm.server or python3 -m mlx_lm.server)") {
+                            TextField("mlx_lm.server", text: $mlxBinaryPath)
+                                .textFieldStyle(.roundedBorder)
+                        }
+                        
+                        HStack(alignment: .top, spacing: 24) {
+                            ConfigField(label: "Port", hint: "Local server port") {
+                                TextField("", text: $port)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 100)
+                            }
+                            
+                            ConfigField(label: "Model Repo / Path", hint: "Hugging Face repo or local directory path") {
+                                TextField("jedisct1/gemma-4-12B-it-txt-mlx-8bit", text: $mlxModel)
+                                    .textFieldStyle(.roundedBorder)
+                            }
+                        }
+                        
+                        ConfigField(label: "Extra Arguments", hint: "Additional flags for mlx_lm.server (e.g. --trust-remote-code)") {
+                            TextField("", text: $mlxExtraArgs)
+                                .textFieldStyle(.roundedBorder)
+                        }
                     }
                 }
                 .padding()
@@ -256,7 +412,7 @@ struct ServerControlView: View {
                         Button(action: {
                             startServer()
                         }) {
-                            Label("Start LLAMA Server", systemImage: "play.fill")
+                            Label(serverType == .llamaCpp ? "Start LLAMA Server" : "Start MLX Server", systemImage: "play.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
@@ -265,6 +421,20 @@ struct ServerControlView: View {
                     }
                 }
                 
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "info.circle.fill")
+                        .foregroundColor(.blue)
+                        .font(.system(size: 14))
+                        .padding(.top, 1)
+                    Text("LLM Center manages one active server instance at a time. Starting a new engine will automatically stop any running instance to prevent port conflicts and clean up system resources.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineSpacing(3)
+                }
+                .padding()
+                .background(Color.blue.opacity(0.05))
+                .cornerRadius(8)
+                
                 Spacer()
             }
             .padding(30)
@@ -272,14 +442,35 @@ struct ServerControlView: View {
     }
     
     private func startServer() {
-        var args = ["--host", "127.0.0.1", "--port", port]
-        if !presetPath.isEmpty {
-            args.append(contentsOf: ["--models-preset", presetPath])
+        if serverType == .llamaCpp {
+            var args = ["--host", "127.0.0.1", "--port", port]
+            if !presetPath.isEmpty {
+                args.append(contentsOf: ["--models-preset", presetPath])
+            }
+            let extras = extraArgs.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+            args.append(contentsOf: extras)
+            
+            viewModel.startServer(binaryPath: binaryPath, args: args)
+        } else {
+            var fullBinaryPath = mlxBinaryPath.trimmingCharacters(in: .whitespaces)
+            var args: [String] = []
+            
+            // Check if user specifies command starting with python
+            if fullBinaryPath.hasPrefix("python") {
+                let parts = fullBinaryPath.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+                if parts.count > 1 {
+                    fullBinaryPath = parts[0]
+                    args.append(contentsOf: parts[1...])
+                }
+            }
+            
+            args.append(contentsOf: ["--model", mlxModel, "--port", port])
+            
+            let extras = mlxExtraArgs.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
+            args.append(contentsOf: extras)
+            
+            viewModel.startServer(binaryPath: fullBinaryPath, args: args)
         }
-        let extras = extraArgs.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-        args.append(contentsOf: extras)
-        
-        viewModel.startServer(binaryPath: binaryPath, args: args)
     }
 }
 
@@ -297,13 +488,12 @@ struct OverviewView: View {
                         .foregroundColor(.secondary)
 
                     VStack(alignment: .leading, spacing: 16) {
-                        // Line 1: CPU | RAM | GPU
                         HStack(spacing: 24) {
-                            InsightItem(label: "CPU", value: "\(viewModel.cpuModel) (\(viewModel.cpuCores) cores)")
+                            InsightItem(label: "CPU", iconName: "cpu", value: "\(viewModel.cpuModel) (\(viewModel.cpuCores) cores)")
                             Divider().frame(height: 12)
-                            InsightItem(label: "GPU", value: "\(viewModel.gpuName) (\(Int(viewModel.totalMemory)) GB Shared)")
+                            InsightItem(label: "GPU", iconName: "display", value: "\(viewModel.gpuName) (\(Int(viewModel.totalMemory)) GB Shared)")
                             Divider().frame(height: 12)
-                            InsightItem(label: "RAM", value: String(format: "%.0f GB Unified", viewModel.totalMemory))
+                            InsightItem(label: "RAM", iconName: "memorychip", value: String(format: "%.0f GB Unified", viewModel.totalMemory))
                         }
 
                         Divider()
@@ -328,12 +518,12 @@ struct OverviewView: View {
 
                 
                 VStack(alignment: .leading, spacing: 16) {
-                    Text("ABOUT LLAMACENTER")
+                    Text("ABOUT LLM CENTER")
                         .font(.caption.bold())
                         .foregroundColor(.secondary)
                     
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("LlamaCenter is your unified control center for local Large Language Models on macOS. It provides native management for **llama.cpp** instances and real-time monitoring for **Ollama** daemons.")
+                        Text("LLM Center is your unified control center for local Large Language Models on macOS. It provides native launcher management for **llama.cpp** and **MLX**, alongside real-time monitoring for **Ollama** daemons.")
                             .font(.subheadline)
                             .fixedSize(horizontal: false, vertical: true)
                         
@@ -537,12 +727,18 @@ struct ModelRow: View {
                         .font(.body.monospaced())
                         .lineLimit(1)
                     
-                    Text(model.source == .llama ? "LLAMA" : "OLLAMA")
+                    Text(model.source == .llama ? "LLAMA" : (model.source == .mlx ? "MLX" : "OLLAMA"))
                         .font(.system(size: 8, weight: .black))
                         .padding(.horizontal, 4)
                         .padding(.vertical, 2)
-                        .background(model.source == .llama ? Color.blue.opacity(0.1) : Color.orange.opacity(0.1))
-                        .foregroundColor(model.source == .llama ? .blue : .orange)
+                        .background(
+                            model.source == .llama ? Color.blue.opacity(0.1) :
+                            (model.source == .mlx ? Color.purple.opacity(0.1) : Color.orange.opacity(0.1))
+                        )
+                        .foregroundColor(
+                            model.source == .llama ? .blue :
+                            (model.source == .mlx ? .purple : .orange)
+                        )
                         .cornerRadius(3)
                 }
                 
@@ -553,22 +749,24 @@ struct ModelRow: View {
             
             Spacer()
             
-            if model.isActive {
-                Button("Unload") {
-                    onUnload()
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-            } else if model.statusText == "unloaded" {
-                Button("Load") {
-                    onLoad()
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.small)
-            } else if model.statusText == "loading" {
-                ProgressView()
+            if model.source != .mlx {
+                if model.isActive {
+                    Button("Unload") {
+                        onUnload()
+                    }
+                    .buttonStyle(.bordered)
                     .controlSize(.small)
-                    .padding(.trailing, 8)
+                } else if model.statusText == "unloaded" {
+                    Button("Load") {
+                        onLoad()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                } else if model.statusText == "loading" {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.trailing, 8)
+                }
             }
         }
         .padding()
@@ -602,16 +800,24 @@ struct InfoRow: View {
 
 struct InsightItem: View {
     let label: String
+    let iconName: String
     let value: String
     
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.caption2.bold())
+        HStack(alignment: .center, spacing: 8) {
+            Image(systemName: iconName)
+                .font(.system(size: 14))
                 .foregroundColor(.secondary)
-            Text(value)
-                .font(.system(.caption, design: .monospaced))
-                .bold()
+                .frame(width: 18)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.caption2.bold())
+                    .foregroundColor(.secondary)
+                Text(value)
+                    .font(.system(.caption, design: .monospaced))
+                    .bold()
+            }
         }
     }
 }
@@ -688,9 +894,9 @@ struct ObserverMiniView: View {
             }
             
             VStack(spacing: 14) {
-                VerticalMiniStat(label: "C", value: viewModel.systemCPU, color: .blue)
-                VerticalMiniStat(label: "G", value: viewModel.gpuUsage, color: .orange)
-                VerticalMiniStat(label: "R", value: viewModel.systemMemory, color: .green, suffix: "G")
+                CircularMiniStat(iconName: "cpu", value: viewModel.systemCPU, max: 100, color: .blue)
+                CircularMiniStat(iconName: "display", value: viewModel.gpuUsage, max: 100, color: .orange)
+                CircularMiniStat(iconName: "memorychip", value: viewModel.systemMemory, max: viewModel.totalMemory, color: .green, suffix: "G")
             }
             
             Image(systemName: "brain.head.profile")
@@ -699,7 +905,8 @@ struct ObserverMiniView: View {
                 .symbolEffect(.pulse, value: viewModel.isLLMRunning)
         }
         .padding(.vertical, 12)
-        .padding(.horizontal, 8)
+        .padding(.horizontal, 10)
+        .frame(minWidth: 46)
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .overlay(
@@ -721,20 +928,36 @@ struct ObserverMiniView: View {
     }
 }
 
-struct VerticalMiniStat: View {
-    let label: String
+struct CircularMiniStat: View {
+    let iconName: String
     let value: Double
+    let max: Double
     let color: Color
     var suffix: String = "%"
     
     var body: some View {
-        VStack(spacing: 2) {
-            Text(label)
-                .font(.system(size: 8, weight: .bold))
-                .foregroundColor(.secondary)
+        VStack(spacing: 4) {
+            ZStack {
+                Circle()
+                    .stroke(color.opacity(0.15), lineWidth: 2.5)
+                    .frame(width: 26, height: 26)
+                
+                Circle()
+                    .trim(from: 0.0, to: CGFloat(min(value / (max > 0 ? max : 1), 1.0)))
+                    .stroke(color, style: StrokeStyle(lineWidth: 2.5, lineCap: .round))
+                    .frame(width: 26, height: 26)
+                    .rotationEffect(Angle(degrees: -90))
+                
+                Image(systemName: iconName)
+                    .font(.system(size: 9))
+                    .foregroundColor(color)
+            }
+            
             Text("\(Int(value))\(suffix)")
-                .font(.system(size: 10, weight: .black, design: .monospaced))
-                .foregroundColor(color)
+                .font(.system(size: 8, weight: .bold, design: .monospaced))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
     }
 }

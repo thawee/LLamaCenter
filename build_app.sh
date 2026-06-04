@@ -1,9 +1,10 @@
 #!/bin/bash
 
 # Configuration
-APP_NAME="LlamaCenter"
-APP_VERSION="0.0.2"
-BUNDLE_ID="com.user.LlamaCenter"
+APP_NAME="LLMCenter"
+APP_DISPLAY_NAME="LLM Center"
+APP_VERSION="0.1.0"
+BUNDLE_ID="com.user.LLMCenter"
 EXECUTABLE_NAME="StatusDashboard"
 
 echo "🔨 Building $APP_NAME v$APP_VERSION..."
@@ -28,6 +29,8 @@ cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>CFBundleDisplayName</key>
+    <string>$APP_DISPLAY_NAME</string>
     <key>CFBundleExecutable</key>
     <string>$EXECUTABLE_NAME</string>
     <key>CFBundleIconFile</key>
@@ -35,7 +38,7 @@ cat <<EOF > "$APP_BUNDLE/Contents/Info.plist"
     <key>CFBundleIdentifier</key>
     <string>$BUNDLE_ID</string>
     <key>CFBundleName</key>
-    <string>$APP_NAME</string>
+    <string>$APP_DISPLAY_NAME</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

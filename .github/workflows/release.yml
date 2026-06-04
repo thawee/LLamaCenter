@@ -27,11 +27,11 @@ jobs:
 
       - name: Package App Bundle
         run: |
-          zip -r "LlamaCenter.zip" "LlamaCenter.app"
+          zip -r "LLMCenter.zip" "LLMCenter.app"
 
       - name: Upload Release Asset
         uses: softprops/action-gh-release@v2
         with:
-          files: LlamaCenter.zip
+          files: LLMCenter.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

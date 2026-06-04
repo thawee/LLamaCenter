@@ -23,14 +23,14 @@ actor LlamaServerClient {
     
     struct ModelInfo: Codable {
         let id: String
-        let status: ModelStatus
+        let status: ModelStatus?
     }
     
     struct ModelStatus: Codable {
         let value: String // "loaded", "unloaded", "loading", etc.
     }
     
-    func fetchLoadedModels() async -> [LLMModelStatus] {
+    func fetchLoadedModels(source: LLMModelSource = .llama) async -> [LLMModelStatus] {
         let url = baseURL.appendingPathComponent("v1/models")
         do {
             let (data, _) = try await session.data(from: url)
@@ -41,9 +41,9 @@ actor LlamaServerClient {
                     LLMModelStatus(
                         id: info.id,
                         name: info.id,
-                        isActive: info.status.value == "loaded",
-                        statusText: info.status.value,
-                        source: .llama
+                        isActive: info.status?.value == "loaded" || info.status == nil,
+                        statusText: info.status?.value ?? "loaded",
+                        source: source
                     )
                 }
         } catch {
