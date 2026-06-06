@@ -3,7 +3,7 @@
 # Configuration
 APP_NAME="LLMCenter"
 APP_DISPLAY_NAME="LLM Center"
-APP_VERSION="0.1.0"
+APP_VERSION="0.2.0"
 BUNDLE_ID="com.user.LLMCenter"
 EXECUTABLE_NAME="StatusDashboard"
 

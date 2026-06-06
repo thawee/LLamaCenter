@@ -18,6 +18,7 @@ final class DashboardViewModel {
     // Service Presence
     var hasOllama: Bool = false
     var hasMLX: Bool = false
+    var hasMLXVLM: Bool = false
     var hasLlamaCpp: Bool = false
     
     // LLAMA Specific
@@ -28,6 +29,7 @@ final class DashboardViewModel {
     
     // Models
     var loadedModels: [LLMModelStatus] = []
+    var isModelsTabActive: Bool = false
     
     // Logs
     var latestLogs: String = ""
@@ -51,8 +53,14 @@ final class DashboardViewModel {
             while !Task.isCancelled {
                 await refreshStats()
                 await refreshLogs()
-                try? await Task.sleep(for: .seconds(2))
+                try? await Task.sleep(for: .seconds(5))
             }
+        }
+    }
+    
+    func forceRefresh() {
+        Task {
+            await refreshStats()
         }
     }
     
@@ -92,28 +100,32 @@ final class DashboardViewModel {
         
         // Service Presence Detection
         self.hasOllama = processes.contains(where: { $0.name.localizedCaseInsensitiveContains("ollama") })
-        self.hasLlamaCpp = processes.contains(where: { !$0.isMLX && $0.name.localizedCaseInsensitiveContains("llama-server") })
+        self.hasLlamaCpp = processes.contains(where: { !$0.isMLX && !$0.isMLXVLM && $0.name.localizedCaseInsensitiveContains("llama-server") })
         self.hasMLX = processes.contains(where: { $0.isMLX })
+        self.hasMLXVLM = processes.contains(where: { $0.isMLXVLM })
         
         // Recover managed state
         let managedRunning = await serverManager.isRunning()
-        let hasLlamaRunning = processes.contains(where: { !$0.isMLX && !$0.name.localizedCaseInsensitiveContains("ollama") })
-        let hasMlxRunning = processes.contains(where: { $0.isMLX })
+        let hasLlamaRunning = processes.contains(where: { !$0.isMLX && !$0.isMLXVLM && !$0.name.localizedCaseInsensitiveContains("ollama") })
+        let hasMlxRunning = processes.contains(where: { $0.isMLX || $0.isMLXVLM })
         self.isServerManaged = managedRunning || hasLlamaRunning || hasMlxRunning
         
         // Model aggregation
-        var allModels: [LLMModelStatus] = []
+        var allModels: [LLMModelStatus] = self.loadedModels
         
-        // 1. llama-server or mlx-server models (Only if server is running)
-        if hasLlamaRunning || hasMlxRunning {
-            let engineSource: LLMModelSource = hasMlxRunning ? .mlx : .llama
-            let serverModels = await serverClient.fetchLoadedModels(source: engineSource)
-            allModels.append(contentsOf: serverModels)
+        if isModelsTabActive {
+            allModels.removeAll()
+            // 1. llama-server or mlx-server models (Only if server is running)
+            if hasLlamaRunning || hasMlxRunning {
+                let engineSource: LLMModelSource = hasMlxRunning ? (self.hasMLXVLM ? .mlxVlm : .mlx) : .llama
+                let serverModels = await serverClient.fetchLoadedModels(source: engineSource)
+                allModels.append(contentsOf: serverModels)
+            }
+            
+            // 2. Ollama models
+            let ollamaModels = await ollamaClient.fetchModels()
+            allModels.append(contentsOf: ollamaModels)
         }
-        
-        // 2. Ollama models
-        let ollamaModels = await ollamaClient.fetchModels()
-        allModels.append(contentsOf: ollamaModels)
         
         self.loadedModels = allModels
         
@@ -217,12 +229,13 @@ struct LLMModelStatus: Identifiable, Hashable {
 }
 
 enum LLMModelSource: String, Codable {
-    case llama, ollama, mlx
+    case llama, ollama, mlx, mlxVlm
 }
 
 enum ServerType: String, CaseIterable, Identifiable, Codable {
     case llamaCpp = "llama.cpp"
     case mlx = "MLX"
+    case mlxVlm = "MLX-VLM"
     
     var id: String { self.rawValue }
 }

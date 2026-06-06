@@ -6,6 +6,7 @@ actor ProcessMonitor {
         let name: String
         let memoryGB: Double
         let isMLX: Bool
+        let isMLXVLM: Bool
     }
     
     func findAllLLMProcesses() -> [ProcessInfo] {
@@ -42,7 +43,9 @@ actor ProcessMonitor {
                                  fullCommand.localizedCaseInsensitiveContains("ollama") ||
                                  fullCommand.localizedCaseInsensitiveContains("llama-cli") ||
                                  fullCommand.localizedCaseInsensitiveContains("mlx_lm") ||
-                                 fullCommand.localizedCaseInsensitiveContains("mlx-lm")
+                                 fullCommand.localizedCaseInsensitiveContains("mlx-lm") ||
+                                 fullCommand.localizedCaseInsensitiveContains("mlx_vlm") ||
+                                 fullCommand.localizedCaseInsensitiveContains("mlx-vlm")
 
                     if isLLAMA, let pid = Int32(pidStr), let rss = Double(rssStr) {
                         // Avoid adding the dashboard itself
@@ -50,11 +53,16 @@ actor ProcessMonitor {
                             let url = URL(fileURLWithPath: parts[2])
                             var displayName = url.lastPathComponent.isEmpty ? "llama-server" : url.lastPathComponent
                             
-                            let isMLX = fullCommand.localizedCaseInsensitiveContains("mlx_lm") ||
-                                        fullCommand.localizedCaseInsensitiveContains("mlx-lm")
+                            let isMLXVLM = fullCommand.localizedCaseInsensitiveContains("mlx_vlm") ||
+                                          fullCommand.localizedCaseInsensitiveContains("mlx-vlm")
+                            let isMLX = !isMLXVLM && (
+                                         fullCommand.localizedCaseInsensitiveContains("mlx_lm") ||
+                                         fullCommand.localizedCaseInsensitiveContains("mlx-lm"))
                             
                             if isMLX {
                                 displayName = "mlx_lm.server"
+                            } else if isMLXVLM {
+                                displayName = "mlx_vlm.server"
                             }
 
                             // Try to guess model name from --alias
@@ -74,6 +82,8 @@ actor ProcessMonitor {
                                     
                                     if isMLX {
                                         displayName = "🍊 \(modelVal)"
+                                    } else if isMLXVLM {
+                                        displayName = "🎨 \(modelVal)"
                                     } else {
                                         let modelUrl = URL(fileURLWithPath: modelVal)
                                         displayName = "📦 \(modelUrl.lastPathComponent)"
@@ -82,7 +92,7 @@ actor ProcessMonitor {
                             }
 
                             let mem = rss / (1024 * 1024) // KB -> GB
-                            found.append(ProcessInfo(pid: pid, name: displayName, memoryGB: mem, isMLX: isMLX))
+                            found.append(ProcessInfo(pid: pid, name: displayName, memoryGB: mem, isMLX: isMLX, isMLXVLM: isMLXVLM))
                         }
                     }
 

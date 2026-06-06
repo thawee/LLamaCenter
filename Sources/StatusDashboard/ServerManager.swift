@@ -60,6 +60,12 @@ actor ServerManager {
         taskMLX.arguments = ["-9", "-f", "mlx_lm.server"]
         try? taskMLX.run()
         taskMLX.waitUntilExit()
+
+        let taskMLXVLM = Process()
+        taskMLXVLM.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
+        taskMLXVLM.arguments = ["-9", "-f", "mlx_vlm.server"]
+        try? taskMLXVLM.run()
+        taskMLXVLM.waitUntilExit()
     }
     
     func isRunning() -> Bool {

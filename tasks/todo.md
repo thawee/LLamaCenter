@@ -56,6 +56,7 @@ Extend the LlamaCenter dashboard to monitor and launch the MLX LLM server using 
 - **Launch at Login**: Implemented a "Launch at Login" toggle in the sidebar bottom toggles area, utilizing the modern AppKit `ServiceManagement` `SMAppService.mainApp` API to cleanly register/unregister the app login item.
 - **Version Bump**: Promoted the application version to `v0.1.0` in `build_app.sh` to reflect the comprehensive set of new capabilities (launcher selections, MLX integrations, premium hardware dials, and login services).
 - **Application Rebranding**: Fully rebranded the application to **LLM Center** (spaced user-facing name) and **LLMCenter** (bundle and CI workflow filename). Preserved the friendly Llama (`🦙`) emoji inside the dropdown header.
-
-
-
+- **Quit / Termination Controls**: Added multiple elegant ways to quit the background application:
+  - **Menu Bar Right-Click Menu**: Clicking the menu bar status item with a right-click or Control-click pops up a native context menu with "Open Dashboard" and "Quit LLM Center" options (while left-clicks continue to directly open/focus the dashboard).
+  - **Sidebar Quit Button**: Added a dedicated red "Quit LLM Center" button at the very bottom of the main dashboard's sidebar.
+  - **Clean Termination**: Both options call `NSApp.terminate(nil)` to cleanly shut down all windows (including the Observer widget) and background servers.
