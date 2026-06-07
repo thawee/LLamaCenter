@@ -10,32 +10,98 @@ struct FullDashboardView: View {
     
     @State private var eventMonitor: Any? = nil
     @State private var idleTimer: Timer? = nil
+    @State private var isLlamaExpanded: Bool = true
+    @State private var isOllamaExpanded: Bool = true
     
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
     
     enum SidebarItem: String, CaseIterable, Identifiable {
-        case overview, server, processes, models, logs
+        case overview, processes, models
+        case llamaLauncher, llamaLogs
+        case ollamaLauncher, ollamaLogs
         var id: String { self.rawValue }
     }
     
     var body: some View {
         NavigationSplitView {
             List(selection: $selection) {
-                Section("System") {
-                    Label("Overview", systemImage: "sparkles")
-                        .tag(SidebarItem.overview)
-                    Label("Processes", systemImage: "cpu")
-                        .tag(SidebarItem.processes)
-                    Label("Models", systemImage: "square.stack.3d.up")
-                        .tag(SidebarItem.models)
+                Label("Overview", systemImage: "sparkles")
+                    .tag(SidebarItem.overview)
+                Label("Processes", systemImage: "cpu")
+                    .tag(SidebarItem.processes)
+                Label("Models", systemImage: "square.stack.3d.up")
+                    .tag(SidebarItem.models)
+                
+                Divider()
+                    .padding(.vertical, 4)
+                
+                // Llama.cpp Collapsible Section
+                Button(action: {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        isLlamaExpanded.toggle()
+                    }
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(.secondary)
+                            .rotationEffect(Angle(degrees: isLlamaExpanded ? 90 : 0))
+                            .frame(width: 10)
+                        
+                        Image(systemName: "cpu.fill")
+                            .foregroundColor(.blue)
+                            .imageScale(.small)
+                        
+                        Text("Llama.cpp")
+                            .font(.caption.bold())
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 4)
+                
+                if isLlamaExpanded {
+                    Label("Launcher", systemImage: "slider.horizontal.3")
+                        .tag(SidebarItem.llamaLauncher)
+                        .padding(.leading, 16)
+                    Label("Logs", systemImage: "terminal")
+                        .tag(SidebarItem.llamaLogs)
+                        .padding(.leading, 16)
                 }
                 
-                Section("Server") {
+                // Ollama Collapsible Section
+                Button(action: {
+                    withAnimation(.easeOut(duration: 0.15)) {
+                        isOllamaExpanded.toggle()
+                    }
+                }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundColor(.secondary)
+                            .rotationEffect(Angle(degrees: isOllamaExpanded ? 90 : 0))
+                            .frame(width: 10)
+                        
+                        Image(systemName: "server.rack")
+                            .foregroundColor(.orange)
+                            .imageScale(.small)
+                        
+                        Text("Ollama")
+                            .font(.caption.bold())
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                .padding(.vertical, 4)
+                
+                if isOllamaExpanded {
                     Label("Launcher", systemImage: "slider.horizontal.3")
-                        .tag(SidebarItem.server)
+                        .tag(SidebarItem.ollamaLauncher)
+                        .padding(.leading, 16)
                     Label("Logs", systemImage: "terminal")
-                        .tag(SidebarItem.logs)
+                        .tag(SidebarItem.ollamaLogs)
+                        .padding(.leading, 16)
                 }
             }
             .listStyle(.sidebar)
@@ -91,14 +157,18 @@ struct FullDashboardView: View {
                 switch selection {
                 case .overview, .none:
                     OverviewView(viewModel: viewModel)
-                case .server:
-                    ServerControlView(viewModel: viewModel)
                 case .processes:
                     ProcessesView(viewModel: viewModel)
                 case .models:
                     ModelsView(viewModel: viewModel)
-                case .logs:
-                    LogsView(viewModel: viewModel)
+                case .llamaLauncher:
+                    ServerControlView(viewModel: viewModel, serverType: .llamaCpp)
+                case .llamaLogs:
+                    LogsView(viewModel: viewModel, logType: .llamaCpp)
+                case .ollamaLauncher:
+                    ServerControlView(viewModel: viewModel, serverType: .ollama)
+                case .ollamaLogs:
+                    LogsView(viewModel: viewModel, logType: .ollama)
                 }
             }
         }
@@ -211,62 +281,67 @@ struct StatusBannerView: View {
     var viewModel: DashboardViewModel
     @Binding var selection: FullDashboardView.SidebarItem?
     @AppStorage("serverPort") private var port: String = "8080"
+    @AppStorage("ollamaPort") private var ollamaPort: String = "11434"
     @Environment(\.openWindow) private var openWindow
     @Environment(\.dismiss) private var dismiss
     
     var body: some View {
         HStack(alignment: .center, spacing: 32) {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(spacing: 8) {
+            HStack(spacing: 24) {
+                // Llama.cpp Status Badge
+                HStack(spacing: 6) {
                     Circle()
-                        .fill(viewModel.isLLMRunning ? Color.green : Color.red)
+                        .fill(viewModel.hasLlamaCpp ? Color.green : Color.red)
                         .frame(width: 8, height: 8)
-                    Text(viewModel.isLLMRunning ? "Server Running" : "Server Offline")
-                        .font(.system(.headline, design: .rounded))
-                }
-                
-                if viewModel.isLLMRunning {
-                    HStack(spacing: 12) {
-                        if let pid = viewModel.llmPID {
-                            Label("PID: \(pid)", systemImage: "cpu")
-                        }
-                        
-                        let isLlama = viewModel.hasLlamaCpp
-                        let engineName = isLlama ? "llama.cpp" : (viewModel.hasMLXVLM ? "MLX-VLM" : (viewModel.hasMLX ? "MLX" : "Ollama"))
-                        
-                        Text("(\(engineName))")
-                            .foregroundColor(.secondary)
-                        
-                        if isLlama {
-                            Button(action: {
-                                if let url = URL(string: "http://127.0.0.1:\(port)") {
-                                    NSWorkspace.shared.open(url)
-                                }
-                            }) {
-                                Label("Open Chat", systemImage: "bubble.left.and.bubble.right")
-                                    .foregroundColor(.blue)
-                            }
-                            .buttonStyle(.link)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("llama.cpp")
+                            .font(.system(.subheadline, design: .rounded).bold())
+                        if viewModel.hasLlamaCpp {
+                            Text("Running (Port \(port))")
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
                         } else {
-                            Button(action: {
-                                selection = .models
-                            }) {
-                                Label("Manage Models", systemImage: "square.stack.3d.up")
-                                    .foregroundColor(.blue)
-                            }
-                            .buttonStyle(.link)
+                            Text("Offline")
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
                         }
                     }
-                    .font(.caption.monospacedDigit())
-                    .foregroundColor(.secondary)
-                } else {
-                    Text("Ready to launch LLAMA server instance.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                }
+                
+                // Ollama Status Badge
+                HStack(spacing: 6) {
+                    Circle()
+                        .fill(viewModel.hasOllama ? Color.green : Color.red)
+                        .frame(width: 8, height: 8)
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Ollama")
+                            .font(.system(.subheadline, design: .rounded).bold())
+                        if viewModel.hasOllama {
+                            Text("Running (Port \(ollamaPort))")
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text("Offline")
+                                .font(.system(size: 9))
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
             }
             
             Spacer()
+            
+            if viewModel.hasLlamaCpp {
+                Button(action: {
+                    if let url = URL(string: "http://127.0.0.1:\(port)") {
+                        NSWorkspace.shared.open(url)
+                    }
+                }) {
+                    Label("Open Chat", systemImage: "bubble.left.and.bubble.right")
+                        .foregroundColor(.blue)
+                }
+                .buttonStyle(.link)
+            }
             
             // Persistent Metrics
             HStack(spacing: 24) {
@@ -324,45 +399,42 @@ struct BannerGaugeStat: View {
 
 struct ServerControlView: View {
     var viewModel: DashboardViewModel
-    @AppStorage("serverType") private var serverType: ServerType = .llamaCpp
+    let serverType: ServerType
     
     // llama.cpp settings
-    @AppStorage("serverBinaryPath") private var binaryPath: String = "~/.local/llama.cpp/llama-server"
+    @AppStorage("serverBinaryPath") private var binaryPath: String = "llama-server"
     @AppStorage("serverPresetPath") private var presetPath: String = "~/.local/models/llama-models.ini"
     @AppStorage("serverExtraArgs") private var extraArgs: String = ""
     
-    // MLX settings
-    @AppStorage("mlxBinaryPath") private var mlxBinaryPath: String = "mlx_lm.server"
-    @AppStorage("mlxModel") private var mlxModel: String = "jedisct1/gemma-4-12B-it-txt-mlx-8bit"
-    @AppStorage("mlxExtraArgs") private var mlxExtraArgs: String = ""
-    
-    // MLX-VLM settings
-    @AppStorage("mlxVlmBinaryPath") private var mlxVlmBinaryPath: String = "mlx_vlm.server"
-    @AppStorage("mlxVlmModel") private var mlxVlmModel: String = "mlx-community/Qwen2.5-VL-7B-Instruct-4bit"
-    @AppStorage("mlxVlmExtraArgs") private var mlxVlmExtraArgs: String = ""
+    // Ollama settings
+    @AppStorage("ollamaBinaryPath") private var ollamaBinaryPath: String = "ollama"
+    @AppStorage("ollamaPort") private var ollamaPort: String = "11434"
+    @AppStorage("ollamaExtraArgs") private var ollamaExtraArgs: String = "serve"
     
     // Shared port setting
     @AppStorage("serverPort") private var port: String = "8080"
+    
+    private var isCurrentServerManagedRunning: Bool {
+        switch serverType {
+        case .llamaCpp:
+            return viewModel.isLlamaManagedRunning || viewModel.hasLlamaCpp
+        case .ollama:
+            return viewModel.isOllamaManagedRunning || viewModel.hasOllama
+        }
+    }
     
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 32) {
                 VStack(alignment: .leading, spacing: 24) {
-                    Text("CONFIGURATION")
+                    Text("\(serverType.rawValue.uppercased()) CONFIGURATION")
                         .font(.caption.bold())
                         .foregroundColor(.secondary)
                     
-                    Picker("Server Engine", selection: $serverType) {
-                        ForEach(ServerType.allCases) { type in
-                            Text(type.rawValue).tag(type)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    
                     if serverType == .llamaCpp {
-                        ConfigField(label: "Binary Path", hint: "Full path to your llama-server executable") {
+                        ConfigField(label: "Binary Path / Command", hint: "Command/path to llama-server (e.g. llama-server)") {
                             HStack {
-                                TextField("", text: $binaryPath)
+                                TextField("llama-server", text: $binaryPath)
                                     .textFieldStyle(.roundedBorder)
                                 Button(action: {
                                     let panel = NSOpenPanel()
@@ -405,51 +477,23 @@ struct ServerControlView: View {
                             TextField("--flash-attn true --ctx-size 8192", text: $extraArgs)
                                 .textFieldStyle(.roundedBorder)
                         }
-                    } else if serverType == .mlx {
-                        ConfigField(label: "Binary Path / Command", hint: "Command/path to mlx_lm.server (e.g. mlx_lm.server or python3 -m mlx_lm.server)") {
-                            TextField("mlx_lm.server", text: $mlxBinaryPath)
-                                .textFieldStyle(.roundedBorder)
-                        }
-                        
-                        HStack(alignment: .top, spacing: 24) {
-                            ConfigField(label: "Port", hint: "Local server port") {
-                                TextField("", text: $port)
-                                    .textFieldStyle(.roundedBorder)
-                                    .frame(width: 100)
-                            }
-                            
-                            ConfigField(label: "Model Repo / Path", hint: "Hugging Face repo or local directory path") {
-                                TextField("jedisct1/gemma-4-12B-it-txt-mlx-8bit", text: $mlxModel)
-                                    .textFieldStyle(.roundedBorder)
-                            }
-                        }
-                        
-                        ConfigField(label: "Extra Arguments", hint: "Additional flags for mlx_lm.server (e.g. --trust-remote-code)") {
-                            TextField("", text: $mlxExtraArgs)
-                                .textFieldStyle(.roundedBorder)
-                        }
                     } else {
-                        // MLX-VLM
-                        ConfigField(label: "Binary Path / Command", hint: "Command/path to mlx_vlm.server (e.g. mlx_vlm.server or python3 -m mlx_vlm.server)") {
-                            TextField("mlx_vlm.server", text: $mlxVlmBinaryPath)
+                        // Ollama
+                        ConfigField(label: "Binary Path / Command", hint: "Command/path to ollama (e.g. ollama)") {
+                            TextField("ollama", text: $ollamaBinaryPath)
                                 .textFieldStyle(.roundedBorder)
                         }
                         
                         HStack(alignment: .top, spacing: 24) {
                             ConfigField(label: "Port", hint: "Local server port") {
-                                TextField("", text: $port)
+                                TextField("", text: $ollamaPort)
                                     .textFieldStyle(.roundedBorder)
                                     .frame(width: 100)
                             }
-                            
-                            ConfigField(label: "Model Repo / Path", hint: "Vision-language model HF repo or local path") {
-                                TextField("mlx-community/Qwen2.5-VL-7B-Instruct-4bit", text: $mlxVlmModel)
-                                    .textFieldStyle(.roundedBorder)
-                            }
                         }
                         
-                        ConfigField(label: "Extra Arguments", hint: "Additional flags for mlx_vlm.server (e.g. --trust-remote-code)") {
-                            TextField("", text: $mlxVlmExtraArgs)
+                        ConfigField(label: "Extra Arguments", hint: "Additional flags for ollama (e.g. serve)") {
+                            TextField("serve", text: $ollamaExtraArgs)
                                 .textFieldStyle(.roundedBorder)
                         }
                     }
@@ -459,9 +503,9 @@ struct ServerControlView: View {
                 .cornerRadius(12)
                 
                 HStack(spacing: 16) {
-                    if viewModel.isServerManaged {
+                    if isCurrentServerManagedRunning {
                         Button(role: .destructive, action: {
-                            viewModel.stopManagedServer()
+                            viewModel.stopManagedServer(type: serverType)
                         }) {
                             Label("Stop Server", systemImage: "stop.fill")
                                 .frame(maxWidth: .infinity)
@@ -470,7 +514,7 @@ struct ServerControlView: View {
                         .controlSize(.large)
                         
                         Button(action: {
-                            viewModel.stopManagedServer()
+                            viewModel.stopManagedServer(type: serverType)
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                                 startServer()
                             }
@@ -484,7 +528,7 @@ struct ServerControlView: View {
                         Button(action: {
                             startServer()
                         }) {
-                            Label(serverType == .llamaCpp ? "Start LLAMA Server" : (serverType == .mlx ? "Start MLX Server" : "Start MLX-VLM Server"), systemImage: "play.fill")
+                            Label(serverType == .llamaCpp ? "Start LLAMA Server" : "Start Ollama Server", systemImage: "play.fill")
                                 .frame(maxWidth: .infinity)
                         }
                         .buttonStyle(.borderedProminent)
@@ -498,7 +542,7 @@ struct ServerControlView: View {
                         .foregroundColor(.blue)
                         .font(.system(size: 14))
                         .padding(.top, 1)
-                    Text("LLM Center manages one active server instance at a time. Starting a new engine will automatically stop any running instance to prevent port conflicts and clean up system resources.")
+                    Text("LLM Center manages server instances running on their configured ports. Starting an engine will run it as a background process until stopped or until the application exits.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineSpacing(3)
@@ -522,46 +566,18 @@ struct ServerControlView: View {
             let extras = extraArgs.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
             args.append(contentsOf: extras)
             
-            viewModel.startServer(binaryPath: binaryPath, args: args)
-        } else if serverType == .mlx {
-            var fullBinaryPath = mlxBinaryPath.trimmingCharacters(in: .whitespaces)
-            var args: [String] = []
-            
-            // Check if user specifies command starting with python
-            if fullBinaryPath.hasPrefix("python") {
-                let parts = fullBinaryPath.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-                if parts.count > 1 {
-                    fullBinaryPath = parts[0]
-                    args.append(contentsOf: parts[1...])
-                }
-            }
-            
-            args.append(contentsOf: ["--model", mlxModel, "--port", port])
-            
-            let extras = mlxExtraArgs.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-            args.append(contentsOf: extras)
-            
-            viewModel.startServer(binaryPath: fullBinaryPath, args: args)
+            viewModel.startServer(type: .llamaCpp, binaryPath: binaryPath, args: args)
         } else {
-            // MLX-VLM
-            var fullBinaryPath = mlxVlmBinaryPath.trimmingCharacters(in: .whitespaces)
-            var args: [String] = []
+            // Ollama
+            let fullBinaryPath = ollamaBinaryPath.trimmingCharacters(in: .whitespaces)
+            let extras = ollamaExtraArgs.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
             
-            // Check if user specifies command starting with python
-            if fullBinaryPath.hasPrefix("python") {
-                let parts = fullBinaryPath.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-                if parts.count > 1 {
-                    fullBinaryPath = parts[0]
-                    args.append(contentsOf: parts[1...])
-                }
+            var env: [String: String] = [:]
+            if !ollamaPort.isEmpty {
+                env["OLLAMA_HOST"] = "127.0.0.1:\(ollamaPort)"
             }
             
-            args.append(contentsOf: ["--model", mlxVlmModel, "--port", port])
-            
-            let extras = mlxVlmExtraArgs.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-            args.append(contentsOf: extras)
-            
-            viewModel.startServer(binaryPath: fullBinaryPath, args: args)
+            viewModel.startServer(type: .ollama, binaryPath: fullBinaryPath, args: extras, environment: env)
         }
     }
 }
@@ -595,10 +611,6 @@ struct OverviewView: View {
                             ServiceStatusItem(name: "Ollama", isActive: viewModel.hasOllama)
                             Divider().frame(height: 12)
                             ServiceStatusItem(name: "llama.cpp", isActive: viewModel.hasLlamaCpp)
-                            Divider().frame(height: 12)
-                            ServiceStatusItem(name: "MLX", isActive: viewModel.hasMLX)
-                            Divider().frame(height: 12)
-                            ServiceStatusItem(name: "MLX-VLM", isActive: viewModel.hasMLXVLM)
                         }
                     }
                     .padding()
@@ -609,7 +621,7 @@ struct OverviewView: View {
                             .stroke(Color.gray.opacity(0.1), lineWidth: 1)
                     )
                 }
-
+ 
                 
                 VStack(alignment: .leading, spacing: 16) {
                     Text("ABOUT LLM CENTER")
@@ -617,7 +629,7 @@ struct OverviewView: View {
                         .foregroundColor(.secondary)
                     
                     VStack(alignment: .leading, spacing: 12) {
-                        Text("LLM Center is your unified control center for local Large Language Models on macOS. It provides native launcher management for **llama.cpp**, **MLX**, and **MLX-VLM**, alongside real-time monitoring for **Ollama** daemons.")
+                        Text("LLM Center is your unified control center for local Large Language Models on macOS. It provides native launcher and process management for **llama.cpp** and **Ollama** servers.")
                             .font(.subheadline)
                             .fixedSize(horizontal: false, vertical: true)
                         
@@ -731,21 +743,25 @@ struct ProcessesView: View {
 
 struct LogsView: View {
     var viewModel: DashboardViewModel
+    let logType: ServerType
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
+            let logPath = logType == .llamaCpp ? viewModel.llamaLogPath : viewModel.ollamaLogPath
+            let logsText = logType == .llamaCpp ? viewModel.latestLlamaLogs : viewModel.latestOllamaLogs
+            
             HStack {
-                Text("Server Logs")
+                Text("\(logType.rawValue) Logs")
                     .font(.title2.bold())
                 Spacer()
-                Text(viewModel.logFilePath)
+                Text(logPath)
                     .font(.caption.monospaced())
                     .foregroundColor(.secondary)
             }
             
             ScrollViewReader { proxy in
                 ScrollView {
-                    Text(viewModel.latestLogs.isEmpty ? "No logs available. Start the server via Launcher to view output." : viewModel.latestLogs)
+                    Text(logsText.isEmpty ? "No logs available. Start the server via Launcher to view output." : logsText)
                         .font(.system(.subheadline, design: .monospaced))
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding()
@@ -753,7 +769,7 @@ struct LogsView: View {
                 }
                 .background(Color.black.opacity(0.8))
                 .cornerRadius(8)
-                .onChange(of: viewModel.latestLogs) {
+                .onChange(of: logsText) {
                     proxy.scrollTo("logContent", anchor: .bottom)
                 }
             }
@@ -764,7 +780,7 @@ struct LogsView: View {
                     .foregroundColor(.secondary)
                 Spacer()
                 Button("Clear Log File") {
-                    viewModel.clearLogs()
+                    viewModel.clearLogs(for: logType)
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -821,19 +837,15 @@ struct ModelRow: View {
                         .font(.body.monospaced())
                         .lineLimit(1)
                     
-                    Text(model.source == .llama ? "LLAMA" : (model.source == .mlx ? "MLX" : (model.source == .mlxVlm ? "MLX-VLM" : "OLLAMA")))
+                    Text(model.source == .llama ? "LLAMA" : "OLLAMA")
                         .font(.system(size: 8, weight: .black))
                         .padding(.horizontal, 4)
                         .padding(.vertical, 2)
                         .background(
-                            model.source == .llama ? Color.blue.opacity(0.1) :
-                            (model.source == .mlx ? Color.purple.opacity(0.1) :
-                            (model.source == .mlxVlm ? Color.pink.opacity(0.1) : Color.orange.opacity(0.1)))
+                            model.source == .llama ? Color.blue.opacity(0.1) : Color.orange.opacity(0.1)
                         )
                         .foregroundColor(
-                            model.source == .llama ? .blue :
-                            (model.source == .mlx ? .purple :
-                            (model.source == .mlxVlm ? .pink : .orange))
+                            model.source == .llama ? .blue : .orange
                         )
                         .cornerRadius(3)
                 }
@@ -845,24 +857,22 @@ struct ModelRow: View {
             
             Spacer()
             
-            if model.source != .mlx && model.source != .mlxVlm {
-                if model.isActive {
-                    Button("Unload") {
-                        onUnload()
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                } else if model.statusText == "unloaded" {
-                    Button("Load") {
-                        onLoad()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.small)
-                } else if model.statusText == "loading" {
-                    ProgressView()
-                        .controlSize(.small)
-                        .padding(.trailing, 8)
+            if model.isActive {
+                Button("Unload") {
+                    onUnload()
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            } else if model.statusText == "unloaded" {
+                Button("Load") {
+                    onLoad()
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+            } else if model.statusText == "loading" {
+                ProgressView()
+                    .controlSize(.small)
+                    .padding(.trailing, 8)
             }
         }
         .padding()

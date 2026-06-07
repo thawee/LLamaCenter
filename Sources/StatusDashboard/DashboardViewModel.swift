@@ -17,8 +17,6 @@ final class DashboardViewModel {
     
     // Service Presence
     var hasOllama: Bool = false
-    var hasMLX: Bool = false
-    var hasMLXVLM: Bool = false
     var hasLlamaCpp: Bool = false
     
     // LLAMA Specific
@@ -32,9 +30,12 @@ final class DashboardViewModel {
     var isModelsTabActive: Bool = false
     
     // Logs
-    var latestLogs: String = ""
-    let logFilePath = NSTemporaryDirectory() + "llama-server.log"
-    var isServerManaged: Bool = false
+    var latestLlamaLogs: String = ""
+    var latestOllamaLogs: String = ""
+    let llamaLogPath = NSTemporaryDirectory() + "llama-server.log"
+    let ollamaLogPath = NSTemporaryDirectory() + "ollama.log"
+    var isLlamaManagedRunning: Bool = false
+    var isOllamaManagedRunning: Bool = false
     
     private let systemMonitor = SystemMonitor()
     private let processMonitor = ProcessMonitor()
@@ -66,11 +67,16 @@ final class DashboardViewModel {
     
     @MainActor
     private func refreshLogs() async {
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: logFilePath)) {
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: llamaLogPath)) {
             if let string = String(data: data, encoding: .utf8) {
-                // Get last 50 lines
                 let lines = string.components(separatedBy: .newlines)
-                self.latestLogs = lines.suffix(50).joined(separator: "\n")
+                self.latestLlamaLogs = lines.suffix(50).joined(separator: "\n")
+            }
+        }
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: ollamaLogPath)) {
+            if let string = String(data: data, encoding: .utf8) {
+                let lines = string.components(separatedBy: .newlines)
+                self.latestOllamaLogs = lines.suffix(50).joined(separator: "\n")
             }
         }
     }
@@ -80,6 +86,9 @@ final class DashboardViewModel {
         // Update port from saved settings
         let savedPort = UserDefaults.standard.string(forKey: "serverPort") ?? "8080"
         await serverClient.setPort(savedPort)
+        
+        let savedOllamaPort = UserDefaults.standard.string(forKey: "ollamaPort") ?? "11434"
+        await ollamaClient.setPort(savedOllamaPort)
         
         // System stats
         let cpu = await systemMonitor.getCPUUsage()
@@ -100,25 +109,20 @@ final class DashboardViewModel {
         
         // Service Presence Detection
         self.hasOllama = processes.contains(where: { $0.name.localizedCaseInsensitiveContains("ollama") })
-        self.hasLlamaCpp = processes.contains(where: { !$0.isMLX && !$0.isMLXVLM && $0.name.localizedCaseInsensitiveContains("llama-server") })
-        self.hasMLX = processes.contains(where: { $0.isMLX })
-        self.hasMLXVLM = processes.contains(where: { $0.isMLXVLM })
+        self.hasLlamaCpp = processes.contains(where: { $0.name.localizedCaseInsensitiveContains("llama-server") || $0.name.localizedCaseInsensitiveContains("llama-cli") })
         
         // Recover managed state
-        let managedRunning = await serverManager.isRunning()
-        let hasLlamaRunning = processes.contains(where: { !$0.isMLX && !$0.isMLXVLM && !$0.name.localizedCaseInsensitiveContains("ollama") })
-        let hasMlxRunning = processes.contains(where: { $0.isMLX || $0.isMLXVLM })
-        self.isServerManaged = managedRunning || hasLlamaRunning || hasMlxRunning
+        self.isLlamaManagedRunning = await serverManager.isRunning(type: .llamaCpp)
+        self.isOllamaManagedRunning = await serverManager.isRunning(type: .ollama)
         
         // Model aggregation
         var allModels: [LLMModelStatus] = self.loadedModels
         
         if isModelsTabActive {
             allModels.removeAll()
-            // 1. llama-server or mlx-server models (Only if server is running)
-            if hasLlamaRunning || hasMlxRunning {
-                let engineSource: LLMModelSource = hasMlxRunning ? (self.hasMLXVLM ? .mlxVlm : .mlx) : .llama
-                let serverModels = await serverClient.fetchLoadedModels(source: engineSource)
+            // 1. llama-server models (Only if server is running)
+            if self.hasLlamaCpp {
+                let serverModels = await serverClient.fetchLoadedModels(source: .llama)
                 allModels.append(contentsOf: serverModels)
             }
             
@@ -178,43 +182,56 @@ final class DashboardViewModel {
         }
     }
     
-    func stopManagedServer() {
+    func stopManagedServer(type: ServerType) {
         Task {
-            await serverManager.stopServer()
-            self.isServerManaged = false
+            await serverManager.stopServer(type: type)
+            if type == .llamaCpp {
+                self.isLlamaManagedRunning = false
+            } else {
+                self.isOllamaManagedRunning = false
+            }
+            await refreshStats()
         }
     }
     
-    func startServer(binaryPath: String, args: [String]) {
+    func startServer(type: ServerType, binaryPath: String, args: [String], environment: [String: String]? = nil) {
+        let logPath = type == .llamaCpp ? llamaLogPath : ollamaLogPath
         Task {
             do {
-                try await serverManager.startServer(binaryPath: binaryPath, arguments: args, logPath: logFilePath)
-                self.isServerManaged = true
+                try await serverManager.startServer(type: type, binaryPath: binaryPath, arguments: args, environment: environment, logPath: logPath)
+                if type == .llamaCpp {
+                    self.isLlamaManagedRunning = true
+                } else {
+                    self.isOllamaManagedRunning = true
+                }
             } catch {
                 // If it fails, log it so the user can see it in the Logs tab
                 let errorMsg = "❌ Failed to start server: \(error.localizedDescription)\n"
-                if let fileHandle = FileHandle(forWritingAtPath: logFilePath) {
+                if let fileHandle = FileHandle(forWritingAtPath: logPath) {
                     fileHandle.seekToEndOfFile()
                     if let data = errorMsg.data(using: .utf8) {
                         fileHandle.write(data)
                     }
                     fileHandle.closeFile()
                 } else {
-                    try? errorMsg.write(to: URL(fileURLWithPath: logFilePath), atomically: true, encoding: .utf8)
+                    try? errorMsg.write(to: URL(fileURLWithPath: logPath), atomically: true, encoding: .utf8)
                 }
             }
         }
     }
     
-    func clearLogs() {
-        // Use FileHandle to truncate instead of atomically replacing the file.
-        // Atomic replacement creates a new inode, which breaks the running server's pipe.
-        if let fileHandle = try? FileHandle(forWritingTo: URL(fileURLWithPath: logFilePath)) {
+    func clearLogs(for type: ServerType) {
+        let path = type == .llamaCpp ? llamaLogPath : ollamaLogPath
+        if let fileHandle = try? FileHandle(forWritingTo: URL(fileURLWithPath: path)) {
             fileHandle.truncateFile(atOffset: 0)
             fileHandle.closeFile()
             
             Task { @MainActor in
-                self.latestLogs = ""
+                if type == .llamaCpp {
+                    self.latestLlamaLogs = ""
+                } else {
+                    self.latestOllamaLogs = ""
+                }
             }
         }
     }
@@ -229,13 +246,12 @@ struct LLMModelStatus: Identifiable, Hashable {
 }
 
 enum LLMModelSource: String, Codable {
-    case llama, ollama, mlx, mlxVlm
+    case llama, ollama
 }
 
 enum ServerType: String, CaseIterable, Identifiable, Codable {
     case llamaCpp = "llama.cpp"
-    case mlx = "MLX"
-    case mlxVlm = "MLX-VLM"
+    case ollama = "Ollama"
     
     var id: String { self.rawValue }
 }

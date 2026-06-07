@@ -1,7 +1,14 @@
 import Foundation
 
 actor OllamaClient {
-    private let baseURL = URL(string: "http://localhost:11434")!
+    private var port: String = "11434"
+    private var baseURL: URL {
+        URL(string: "http://localhost:\(port)")!
+    }
+    
+    func setPort(_ newPort: String) {
+        self.port = newPort
+    }
     
     private let session: URLSession = {
         let config = URLSessionConfiguration.default

@@ -1,6 +1,6 @@
 # LLM Center
 
-Native macOS menu bar app to monitor and manage local LLMs (llama.cpp, MLX & Ollama). Featuring real-time hardware metrics, custom server launching, and model management.
+Native macOS menu bar app to monitor and manage local LLMs (llama.cpp & Ollama). Featuring real-time hardware metrics, custom server launching, and model management.
 
 ## ✨ Features
 
@@ -55,7 +55,7 @@ Within the **Control** tab of the dashboard:
 
 ## 📊 Process Monitoring
 
-The **Processes** tab detects any command line containing `llama-server`, `ollama`, `llama-cli`, or `mlx_lm`. It displays:
+The **Processes** tab detects any command line containing `llama-server`, `ollama`, or `llama-cli`. It displays:
 - **🦙 Alias:** If the process was started with an `--alias`.
 - **📦 Model:** The filename/repo path if started with a `--model` path.
 - **Memory & PID:** Real-time resource utilization.

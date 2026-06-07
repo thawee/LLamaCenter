@@ -1,10 +1,10 @@
 import Foundation
 
 actor ServerManager {
-    private var process: Process?
+    private var processes: [ServerType: Process] = [:]
     
-    func startServer(binaryPath: String, arguments: [String], logPath: String) throws {
-        stopServer()
+    func startServer(type: ServerType, binaryPath: String, arguments: [String], environment: [String: String]? = nil, logPath: String) throws {
+        stopServer(type: type)
         
         let expandedPath = NSString(string: binaryPath).expandingTildeInPath
         let expandedArgs = arguments.map { NSString(string: $0).expandingTildeInPath }
@@ -15,8 +15,21 @@ actor ServerManager {
         }
         
         let task = Process()
-        task.executableURL = URL(fileURLWithPath: expandedPath)
-        task.arguments = expandedArgs
+        if expandedPath.contains("/") {
+            task.executableURL = URL(fileURLWithPath: expandedPath)
+            task.arguments = expandedArgs
+        } else {
+            task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            task.arguments = [expandedPath] + expandedArgs
+        }
+        
+        if let environment = environment {
+            var systemEnv = ProcessInfo.processInfo.environment
+            for (key, val) in environment {
+                systemEnv[key] = val
+            }
+            task.environment = systemEnv
+        }
         
         // Open the log file with O_APPEND so truncating it later works flawlessly
         let fileDescriptor = open(logPath, O_WRONLY | O_CREAT | O_APPEND, 0o644)
@@ -31,44 +44,35 @@ actor ServerManager {
         
         try task.run()
         // We still track it while we are alive, but we won't kill it in deinit
-        self.process = task
+        self.processes[type] = task
     }
     
-    func stopServer() {
-        if let process = process {
+    func stopServer(type: ServerType) {
+        if let process = processes[type] {
             if process.isRunning {
                 process.terminate()
                 process.waitUntilExit()
             }
         }
-        killExistingServers()
-        process = nil
+        killExistingServer(type: type)
+        processes[type] = nil
     }
     
-    // Deinit usually kills standard Process() tasks. 
-    // To be extra sure for Option 2, we just don't call terminate in deinit.
-
-    private func killExistingServers() {
+    func stopAllServers() {
+        for type in ServerType.allCases {
+            stopServer(type: type)
+        }
+    }
+    
+    private func killExistingServer(type: ServerType) {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        task.arguments = ["-9", "llama-server"]
+        task.arguments = ["-9", type == .llamaCpp ? "llama-server" : "ollama"]
         try? task.run()
         task.waitUntilExit()
-
-        let taskMLX = Process()
-        taskMLX.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        taskMLX.arguments = ["-9", "-f", "mlx_lm.server"]
-        try? taskMLX.run()
-        taskMLX.waitUntilExit()
-
-        let taskMLXVLM = Process()
-        taskMLXVLM.executableURL = URL(fileURLWithPath: "/usr/bin/pkill")
-        taskMLXVLM.arguments = ["-9", "-f", "mlx_vlm.server"]
-        try? taskMLXVLM.run()
-        taskMLXVLM.waitUntilExit()
     }
     
-    func isRunning() -> Bool {
-        return process?.isRunning ?? false
+    func isRunning(type: ServerType) -> Bool {
+        return processes[type]?.isRunning ?? false
     }
 }
